@@ -128,7 +128,7 @@ defmodule Workex.Dict do
   end
 
   @doc false
-  def size(%__MODULE__{items: items}), do: Map.size(items)
+  def size(%__MODULE__{items: items}), do: map_size(items)
 
   defimpl Workex.Aggregate do
     defdelegate add(aggregate, message), to: Workex.Dict

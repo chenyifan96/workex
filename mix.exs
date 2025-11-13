@@ -1,6 +1,4 @@
-Code.ensure_loaded?(Hex) and Hex.start
-
-defmodule Workex.Mixfile do
+defmodule Workex.MixProject do
   use Mix.Project
 
   @version "0.10.0"
@@ -9,38 +7,45 @@ defmodule Workex.Mixfile do
     [
       app: :workex,
       version: @version,
-      elixir: "~> 1.0",
-      elixirc_paths: elixirc_paths(Mix.env),
-      deps: deps,
-      build_embedded: Mix.env == :prod,
-      start_permanent: Mix.env == :prod,
-      source_url: "https://github.com/sasa1977/workex",
-      package: [
-        maintainers: ["Saša Jurić"],
-        licenses: ["MIT"],
-        links: %{
-          "Github": "https://github.com/sasa1977/workex",
-          "Docs": "http://hexdocs.pm/workex"
-        }
-      ],
+      elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      deps: deps(),
+      package: package(),
       description: "A behaviour for simple flow control and backpressure.",
-      docs: [
-        extras: ["README.md"],
-        main: "Workex",
-        source_url: "https://github.com/sasa1977/workex/",
-        source_ref: @version
-      ]
+      docs: docs()
     ]
   end
 
   def application do
-    [applications: [:logger]]
+    [
+      extra_applications: [:logger]
+    ]
   end
 
   defp deps do
     [
       {:exactor, "~> 2.2.0"},
-      {:ex_doc, "~> 0.10.0", only: :docs}
+      {:ex_doc, "~> 0.10.0", only: :docs, runtime: false}
+    ]
+  end
+
+  defp package do
+    [
+      maintainers: ["Saša Jurić"],
+      licenses: ["MIT"],
+      links: %{
+        "Github" => "https://github.com/sasa1977/workex",
+        "Docs" => "http://hexdocs.pm/workex"
+      }
+    ]
+  end
+
+  defp docs do
+    [
+      extras: ["README.md"],
+      main: "Workex",
+      source_url: "https://github.com/sasa1977/workex/",
+      source_ref: @version
     ]
   end
 

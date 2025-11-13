@@ -1,47 +1,48 @@
 defmodule Workex.Worker do
   @moduledoc false
-  use ExActor.Tolerant
+  use GenServer
 
   defstruct [:queue_pid, :callback, :state]
 
-  defstart start(queue_pid, callback, arg)
-  defstart start_link(queue_pid, callback, arg)
+  def start(queue_pid, callback, arg) do
+    GenServer.start(__MODULE__, {queue_pid, callback, arg})
+  end
 
-  definit {queue_pid, callback, arg} do
+  def start_link(queue_pid, callback, arg) do
+    GenServer.start_link(__MODULE__, {queue_pid, callback, arg})
+  end
+
+  @impl true
+  def init({queue_pid, callback, arg}) do
     case callback.init(arg) do
       {:ok, state} ->
-        %__MODULE__{
+        {:ok, %__MODULE__{
           queue_pid: queue_pid,
           callback: callback,
           state: state
-        }
-        |> initial_state
+        }}
 
       {:ok, state, timeout} ->
-        %__MODULE__{
+        {:ok, %__MODULE__{
           queue_pid: queue_pid,
           callback: callback,
           state: state
-        }
-        |> initial_state(timeout)
+        }, timeout}
 
       other -> other
     end
   end
 
-
-  defcast process(messages),
-    state: %__MODULE__{callback: callback, state: state} = worker_state
-  do
-    callback.handle(messages, state)
-    |> handle_response(worker_state)
+  @impl true
+  def handle_cast({:process, messages}, %__MODULE__{callback: callback, state: state} = worker_state) do
+    response = callback.handle(messages, state)
+    handle_response(response, worker_state)
   end
 
-  defhandleinfo message,
-    state: %__MODULE__{callback: callback, state: state} = worker_state
-  do
-    callback.handle_message(message, state)
-    |> handle_response(worker_state)
+  @impl true
+  def handle_info(message, %__MODULE__{callback: callback, state: state} = worker_state) do
+    response = callback.handle_message(message, state)
+    handle_response(response, worker_state)
   end
 
   defp handle_response(
@@ -51,16 +52,17 @@ defmodule Workex.Worker do
     case response do
       {:ok, new_state} ->
         send(queue_pid, {:workex, :worker_available})
-        new_state(%__MODULE__{worker_state | state: new_state})
+        {:noreply, %__MODULE__{worker_state | state: new_state}}
 
       {:ok, new_state, timeout_or_hibernate} ->
         send(queue_pid, {:workex, :worker_available})
-        new_state(%__MODULE__{worker_state | state: new_state}, timeout_or_hibernate)
+        {:noreply, %__MODULE__{worker_state | state: new_state}, timeout_or_hibernate}
 
       {:stop, reason, new_state} ->
         {:stop, reason, %__MODULE__{worker_state | state: new_state}}
 
-      {:stop, reason} -> {:stop, reason, state}
+      {:stop, reason} ->
+        {:stop, reason, state}
     end
   end
 end
