@@ -458,22 +458,30 @@ defmodule Workex.AgedPriorityAggregate do
     end
   end
 
+  # 辅助函数：使用 pop 方法一条一条读取消息
+  def value_pop(aggregate, max_retries \\ 100) do
+    case pop(aggregate) do
+      {{:value, message}, new_aggregate} ->
+        {[message], new_aggregate}
+      {{:expired, _}, new_aggregate} when max_retries > 0 ->
+        # 如果消息过期，递归尝试下一条（最多重试100次，防止无限循环）
+        value_pop(new_aggregate, max_retries - 1)
+      {:empty, new_aggregate} ->
+        {[], new_aggregate}
+      {{:expired, _}, new_aggregate} ->
+        # 重试次数用尽，返回空列表
+        {[], new_aggregate}
+    end
+  end
+
   defimpl Workex.Aggregate do
     defdelegate add(aggregate, message), to: Workex.AgedPriorityAggregate
     defdelegate size(aggregate), to: Workex.AgedPriorityAggregate
     defdelegate remove_oldest(aggregate), to: Workex.AgedPriorityAggregate
 
     def value(aggregate) do
-      # 批量取出所有有效消息
-      {messages, _expired_count, new_aggregate} = Workex.AgedPriorityAggregate.pop_batch(
-        aggregate,
-        Workex.AgedPriorityAggregate.size(aggregate)
-      )
-
-      {messages, %Workex.AgedPriorityAggregate{
-        max_age: new_aggregate.max_age,
-        processed_count: new_aggregate.processed_count
-      }}
+      # 使用 pop 方法一条一条读取消息
+      Workex.AgedPriorityAggregate.value_pop(aggregate)
     end
   end
 end
