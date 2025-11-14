@@ -43,8 +43,10 @@ defmodule WorkexTest do
       Workex.push(server, 2)
       Workex.push(server, 3)
 
+      # 现在 value/1 只取出一条消息，所以每次处理一条
       assert_receive([1])
-      assert_receive([2, 3])
+      assert_receive([2])
+      assert_receive([3])
     end
 
     test "max_size 限制 - replace_oldest: false" do

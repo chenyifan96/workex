@@ -148,8 +148,14 @@ defmodule Workex.Queue do
   end
 
   @doc false
-  def value(%__MODULE__{items: items}) do
-    {:queue.to_list(items), %__MODULE__{}}
+  def value(%__MODULE__{} = queue) do
+    # 使用 pop 方法一条一条读取消息（与 AgedPriorityAggregate 保持一致）
+    case pop(queue) do
+      {{:value, message}, new_queue} ->
+        {[message], new_queue}
+      {:empty, queue} ->
+        {[], queue}
+    end
   end
 
   @doc false
