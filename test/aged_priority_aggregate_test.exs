@@ -202,9 +202,9 @@ defmodule AgedPriorityAggregateTest do
       # 批量取出
       {messages, expired_count, aggregate_after} = AgedPriorityAggregate.pop_batch(aggregate, 10)
 
-      # 应该没有有效消息，所有低优先级都过期了（允许1-2条误差）
+      # 应该没有有效消息，所有低优先级都过期了（允许±2条误差）
       assert length(messages) == 0, "应该没有有效消息（全部过期），实际有效消息数: #{length(messages)}"
-      assert expired_count >= 8 and expired_count <= 10, "应该有8-10条过期消息（允许误差），实际过期: #{expired_count}"
+      assert expired_count >= 8 and expired_count <= 10, "应该有8-10条过期消息（允许±2条误差），实际过期: #{expired_count}"
 
       # 验证队列状态
       stats_after = AgedPriorityAggregate.stats(aggregate_after)
@@ -243,7 +243,7 @@ defmodule AgedPriorityAggregateTest do
       # 手动清理
       {expired_count, aggregate_after} = AgedPriorityAggregate.cleanup_expired(aggregate)
 
-      assert expired_count >= 3 and expired_count <= 5, "应该清理了3-5条过期消息（允许误差），实际清理: #{expired_count}"
+      assert expired_count >= 3 and expired_count <= 5, "应该清理了3-5条过期消息（允许±2条误差），实际清理: #{expired_count}"
       assert aggregate_after.total_size == 0, "清理后队列应该为空，实际剩余: #{aggregate_after.total_size}"
 
       # 验证清理后统计
@@ -464,9 +464,9 @@ defmodule AgedPriorityAggregateTest do
       # 尝试取出低优先级消息，应该有一些过期了
       {low_messages, expired_count, aggregate_after} = AgedPriorityAggregate.pop_batch(aggregate, 50)
 
-      # 应该有一些低优先级消息过期了（前5条左右，允许1-2条误差）
+      # 应该有一些低优先级消息过期了（前5条左右，允许±2条误差）
       assert expired_count > 0, "应该有低优先级消息过期，实际过期: #{expired_count}"
-      assert expired_count >= 3, "应该至少有3条过期（年龄26-22 > max_age 20，允许误差），实际过期: #{expired_count}"
+      assert expired_count >= 3, "应该至少有3条过期（年龄26-22 > max_age 20，允许±2条误差），实际过期: #{expired_count}"
 
       # 有效的低优先级消息应该少于50条
       assert length(low_messages) < 50, "有效消息应该少于50条（部分过期），实际有效: #{length(low_messages)}"
@@ -479,12 +479,12 @@ defmodule AgedPriorityAggregateTest do
       assert stats_after.low == 0, "低优先级队列应该为空，实际剩余: #{stats_after.low}"
 
       # 验证防饥饿机制：部分低优先级消息被处理了（如果还有有效消息）
-      # 注意：由于年龄机制，部分消息可能过期，但至少应该有一些消息在窗口内（允许1-2条误差）
+      # 注意：由于年龄机制，部分消息可能过期，但至少应该有一些消息在窗口内（允许±2条误差）
       if length(low_messages) > 0 do
-        assert length(low_messages) >= 18, "防饥饿验证：如果有有效消息，应该至少有18条在窗口内被处理（允许2条误差），实际: #{length(low_messages)}"
+        assert length(low_messages) >= 18, "防饥饿验证：如果有有效消息，应该至少有18条在窗口内被处理（允许±2条误差），实际: #{length(low_messages)}"
       else
-        # 如果所有消息都过期了，说明过期机制正常工作（允许1-2条误差）
-        assert expired_count >= 48 and expired_count <= 50, "如果所有消息都过期，应该有48-50条过期（允许误差），实际: #{expired_count}"
+        # 如果所有消息都过期了，说明过期机制正常工作（允许±2条误差）
+        assert expired_count >= 48 and expired_count <= 50, "如果所有消息都过期，应该有48-50条过期（允许±2条误差），实际: #{expired_count}"
       end
     end
   end

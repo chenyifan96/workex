@@ -1058,6 +1058,163 @@ defmodule AgedPriorityWorkerDemo do
   end
 
   # ============================================================================
+  # 场景 6: max_size 限制 - 防止队列无限增长（AgedPriorityAggregate）
+  # ============================================================================
+
+  defmodule MaxSizeAgedProcessor do
+    @moduledoc """
+    容量限制处理器 - 验证 max_size 限制（AgedPriorityAggregate）
+    """
+    use Workex
+
+    def init(opts) do
+      parent = opts[:parent] || self()
+      {:ok, %{parent: parent, processed: []}}
+    end
+
+    def handle(messages, state) do
+      parent = state[:parent]
+
+      # 按优先级分组统计
+      by_priority = Enum.group_by(messages, fn {p, _} -> p end)
+
+      [:high, :medium, :low]
+      |> Enum.each(fn priority ->
+        if Map.has_key?(by_priority, priority) do
+          count = length(by_priority[priority])
+          symbol = case priority do
+            :high -> "🔴"
+            :medium -> "🟡"
+            :low -> "🟢"
+          end
+          IO.puts("     #{symbol} [#{priority}] 处理了 #{count} 条")
+        end
+      end)
+
+      # 通知父进程
+      if parent, do: send(parent, {:batch_done, length(messages), by_priority})
+
+      {:ok, state}
+    end
+  end
+
+  def demo_max_size_limit_aged do
+    IO.puts("\n" <> String.duplicate("=", 70))
+    IO.puts("【场景 6】max_size 限制 - 防止队列无限增长（AgedPriorityAggregate）")
+    IO.puts(String.duplicate("=", 70))
+
+    IO.puts("\n说明：验证 max_size 参数防止队列无限增长（结合过期机制）")
+
+    IO.puts("\n实验设计：")
+    IO.puts("  • max_size: 15条")
+    IO.puts("  • max_age: 20条（窗口大小）")
+    IO.puts("  • replace_oldest: false（拒绝新消息）")
+    IO.puts("  • 快速发送 30条消息（混合优先级）")
+    IO.puts("  • 验证队列大小不会超过 max_size")
+
+    # 启动 Worker，设置 max_size = 15
+    {:ok, worker} = Workex.start_link(
+      MaxSizeAgedProcessor,
+      [parent: self()],
+      aggregate: %Workex.AgedPriorityAggregate{max_age: 20},
+      max_size: 15,
+      replace_oldest: false
+    )
+
+    IO.puts("\n1️⃣  快速发送 30条消息（超过 max_size=15）")
+
+    # 发送30条消息（混合优先级）
+    results = Enum.map(1..30, fn i ->
+      priority = case rem(i, 3) do
+        0 -> :high
+        1 -> :medium
+        _ -> :low
+      end
+      result = Workex.push_ack(worker, {priority, "消息-#{i}"})
+      {i, priority, result}
+    end)
+
+    # 统计成功和失败的消息
+    success_count = Enum.count(results, fn {_, _, result} -> result == :ok end)
+    error_count = Enum.count(results, fn {_, _, result} -> result == {:error, :max_capacity} end)
+
+    # 按优先级统计
+    success_by_priority = results
+    |> Enum.filter(fn {_, _, result} -> result == :ok end)
+    |> Enum.group_by(fn {_, priority, _} -> priority end)
+    |> Map.new(fn {k, v} -> {k, length(v)} end)
+
+    IO.puts("   发送结果:")
+    IO.puts("     • 成功入队: #{success_count} 条")
+    IO.puts("       - 高优先级: #{Map.get(success_by_priority, :high, 0)} 条")
+    IO.puts("       - 中优先级: #{Map.get(success_by_priority, :medium, 0)} 条")
+    IO.puts("       - 低优先级: #{Map.get(success_by_priority, :low, 0)} 条")
+    IO.puts("     • 拒绝入队: #{error_count} 条（队列已满）")
+
+    # 等待处理完成
+    :timer.sleep(200)
+
+    # 检查队列状态
+    state = :sys.get_state(worker)
+    aggregate = state.aggregate
+    stats = Workex.AgedPriorityAggregate.stats(aggregate)
+
+    IO.puts("\n2️⃣  验证队列状态")
+
+    IO.puts("   当前队列状态:")
+    IO.puts("     • 总消息数: #{stats.total}")
+    IO.puts("     • 高/中/低: #{stats.high}/#{stats.medium}/#{stats.low}")
+    IO.puts("     • max_size: 15")
+
+    # 验证断言
+    assert stats.total <= 15, "队列大小应该 <= max_size(15)，实际: #{stats.total}"
+    assert error_count > 0, "应该有消息被拒绝（队列满），实际拒绝: #{error_count}"
+
+    IO.puts("\n   ✅ 验证通过:")
+    IO.puts("     • 队列大小不超过 max_size: #{stats.total} <= 15 ✓")
+    IO.puts("     • 队列满时拒绝新消息: #{error_count} 条被拒绝 ✓")
+
+    # 等待队列处理完成
+    IO.puts("\n3️⃣  等待队列处理完成...")
+    :timer.sleep(300)
+
+    # 再次检查队列状态
+    final_state = :sys.get_state(worker)
+    final_aggregate = final_state.aggregate
+    final_stats = Workex.AgedPriorityAggregate.stats(final_aggregate)
+
+    IO.puts("   最终队列状态:")
+    IO.puts("     • 总消息数: #{final_stats.total}")
+    IO.puts("     • 高/中/低: #{final_stats.high}/#{final_stats.medium}/#{final_stats.low}")
+
+    # 收集处理结果
+    processed_results = collect_results([], 30)
+    total_processed = Enum.sum(Enum.map(processed_results, fn {count, _} -> count end))
+
+    IO.puts("   处理统计:")
+    IO.puts("     • 总处理数: #{total_processed} 条")
+    IO.puts("     • 预期处理: #{success_count} 条（成功入队的消息）")
+
+    assert total_processed == success_count, "应该只处理成功入队的消息，实际: #{total_processed}/#{success_count}"
+
+    IO.puts("\n   ✅ 验证通过:")
+    IO.puts("     • 只处理成功入队的消息: #{total_processed}/#{success_count} ✓")
+    IO.puts("     • 被拒绝的消息不会被处理 ✓")
+
+    IO.puts("\n💡 max_size 机制（结合 AgedPriorityAggregate）:")
+    IO.puts("   • 当队列大小 >= max_size 且 worker 不可用时，新消息会被拒绝")
+    IO.puts("   • 返回 {:error, :max_capacity}")
+    IO.puts("   • 防止队列无限增长，保护系统内存")
+    IO.puts("   • 结合过期机制：超过 max_age 的消息会被自动丢弃")
+    IO.puts("   • 双重保护：max_size 限制容量，max_age 限制时效")
+
+    IO.puts("\n✓ 演示完成：展示了 max_size 限制防止队列无限增长（结合过期机制）")
+
+    GenServer.stop(worker)
+    :timer.sleep(50)
+  end
+
+  # ============================================================================
   # 主函数
   # ============================================================================
 
@@ -1069,6 +1226,7 @@ defmodule AgedPriorityWorkerDemo do
     demo_realtime_data_stream()      # 场景3: 实时数据流
     demo_smart_push_system()         # 场景4: 智能推送
     demo_rate_limit_scenario()       # 场景5: 生产者-消费者限流测试
+    demo_max_size_limit_aged()       # 场景6: max_size 限制 - 防止队列无限增长
 
     print_footer()
   end
