@@ -281,6 +281,47 @@ defmodule Workex do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, %__MODULE__{
+    aggregate: _aggregate,
+    worker_pid: _worker_pid,
+    processing_responses: processing_responses,
+    pending_responses: pending_responses
+  }) do
+    # 清理：通知所有待处理的响应
+    # 由于进程被终止，消息可能没有被处理，应该回复错误
+
+    # 1. 正在处理的响应（processing_responses）
+    # 这些是 push_block 的响应，消息正在处理但进程被终止
+    # 注意：如果 worker 在终止前已经完成处理并调用了 notify_pending，
+    # 这些响应可能已经被回复，但为了安全起见，我们仍然尝试回复
+    # GenServer.reply/2 对于已经回复的响应会抛出错误，需要捕获
+    Enum.each(processing_responses, fn from ->
+      try do
+        GenServer.reply(from, {:error, :shutdown})
+      rescue
+        ArgumentError -> :ok  # 响应已经被回复，忽略错误
+      end
+    end)
+
+    # 2. 等待入队的响应（pending_responses）
+    # 这些是 push_block 的响应，消息已入队但进程被终止，消息会被丢弃
+    Enum.each(pending_responses, fn from ->
+      try do
+        GenServer.reply(from, {:error, :shutdown})
+      rescue
+        ArgumentError -> :ok  # 响应已经被回复，忽略错误
+      end
+    end)
+
+    # 注意：队列中的消息会被丢弃
+    # 如果需要处理剩余消息，可以在这里添加逻辑
+    # 例如：等待 worker 处理完当前消息，或者将剩余消息保存到其他地方
+
+    # Worker 进程会因为链接关系自动退出
+    :ok
+  end
+
   defp notify_pending(%__MODULE__{processing_responses: processing_responses} = state) do
     Enum.each(processing_responses, &GenServer.reply(&1, :ok))
     %__MODULE__{state | processing_responses: MapSet.new}
